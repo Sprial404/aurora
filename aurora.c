@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <termios.h>
@@ -8,13 +9,23 @@
 
 static struct termios old_termios;
 
+static void aurora_die(const char *s) {
+    perror(s);
+    exit(1);
+}
+
 static void aurora_restore_terminal_settings(void)
 {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios);
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) {
+        aurora_die("restoring terminal settings");
+    }
 }
 
 static void aurora_enable_raw_mode(void) {
-  tcgetattr(STDIN_FILENO, &old_termios);
+  if (tcgetattr(STDIN_FILENO, &old_termios) == -1) {
+    aurora_die("getting terminal settings");
+  }
+
   atexit(aurora_restore_terminal_settings);
 
   struct termios raw = old_termios;
@@ -27,7 +38,9 @@ static void aurora_enable_raw_mode(void) {
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 1;
 
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+    aurora_die("setting terminal settings");
+  }
 }
 
 int main(void) {
@@ -35,7 +48,11 @@ int main(void) {
 
   while (1) {
     u8 ch;
-    read(STDIN_FILENO, &ch, 1);
+
+    // On Cygwin, when read() times out, it returns -1 and errno is set to EAGAIN instead of returning 0 like it is supposed to.
+    if (read(STDIN_FILENO, &ch, 1) == -1 && errno != EAGAIN) {
+      aurora_die("reading from stdin");
+    }
 
     if (iscntrl(ch)) {
       printf("%d\r\n", ch);
