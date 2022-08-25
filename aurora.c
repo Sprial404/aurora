@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -23,34 +24,65 @@ struct aurora_state {
 
 struct aurora_state g_state;
 
-/*** SECTION: Output handling */
+/*** SECTION: Buffering */
 
-static void aurora_clear_screen(void) {
-  write(STDOUT_FILENO, "\x1b[2J", 4);
-  write(STDOUT_FILENO, "\x1b[H", 3);
+struct aurora_buffer {
+  char *buf;
+  unsigned int len;
+};
+
+#define AURORA_BUFFER_INIT {NULL, 0}
+
+void aurora_bappend(struct aurora_buffer *buf, const char *s, unsigned int len) {
+  char *new_buf = realloc(buf->buf, buf->len + len);
+  if (new_buf == NULL) {
+    return;
+  }
+
+  memcpy(&new_buf[buf->len], s, len);
+  buf->buf = new_buf;
+  buf->len += len;
 }
 
-static void aurora_editor_draw_rows(int nrows) {
+void aurora_bfree(struct aurora_buffer *buf) {
+  free(buf->buf);
+}
+
+/*** SECTION: Output handling */
+
+static void aurora_editor_draw_rows(struct aurora_buffer *buf) {
+  int nrows = g_state.screen_size.y;
+
   for (int y = 0; y < nrows; y++) {
-    write(STDOUT_FILENO, "~", 1);
+    aurora_bappend(buf, "~", 1);
 
     if (y < nrows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      aurora_bappend(buf, "\r\n", 2);
     }
   }
 }
 
 static void aurora_redraw_screen(void) {
-  aurora_clear_screen();
-  aurora_editor_draw_rows(g_state.screen_size.height);
+  struct aurora_buffer buf = AURORA_BUFFER_INIT;
 
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  aurora_bappend(&buf, "\x1b[?25l", 6);
+  aurora_bappend(&buf, "\x1b[2J", 4);
+  aurora_bappend(&buf, "\x1b[H", 3);
+
+  aurora_editor_draw_rows(&buf);
+
+  aurora_bappend(&buf, "\x1b[H", 3);
+  aurora_bappend(&buf, "\x1b[?25h", 6);
+
+  write(STDOUT_FILENO, buf.buf, buf.len);
+  aurora_bfree(&buf);
 }
 
 /*** SECTION: Terminal handling */
 
 static void aurora_die(const char *s) {
-  aurora_clear_screen();
+  write(STDOUT_FILENO, "\x1b[2J", 4);
+  write(STDOUT_FILENO, "\x1b[H", 3);
 
   perror(s);
   exit(1);
@@ -150,7 +182,9 @@ static int aurora_get_window_size(v2u *size) {
 static void aurora_process_keypress(u8 c) {
   switch (c) {
     case CTRL_KEY('q'):
-      aurora_clear_screen();
+      write(STDOUT_FILENO, "\x1b[2J", 4);
+      write(STDOUT_FILENO, "\x1b[H", 3);
+
       exit(0);
       break;
   }
