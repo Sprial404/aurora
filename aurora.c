@@ -11,6 +11,8 @@
 
 /*** SECTION: Defines */
 
+#define AURORA_VERSION "0.1.0"
+
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 /*** SECTION: Constants */
@@ -52,9 +54,29 @@ void aurora_bfree(struct aurora_buffer *buf) {
 
 static void aurora_editor_draw_rows(struct aurora_buffer *buf) {
   int nrows = g_state.screen_size.y;
+  int ncols = g_state.screen_size.x;
 
   for (int y = 0; y < nrows; y++) {
-    aurora_bappend(buf, "~", 1);
+    if (y == nrows / 3) {
+      char welcome[80];
+
+      int welcomelen = snprintf(welcome, sizeof(welcome), "Aurora v%s", AURORA_VERSION);
+      if (welcomelen > ncols) {
+        welcomelen = ncols;
+      }
+      int padding = (ncols - welcomelen) / 2;
+      if (padding) {
+        aurora_bappend(buf, "~", 1);
+        padding -= 1;
+      }
+      while (padding--) {
+        aurora_bappend(buf, " ", 1);
+      }
+
+      aurora_bappend(buf, welcome, welcomelen);
+    } else {
+      aurora_bappend(buf, "~", 1);
+    }
 
     aurora_bappend(buf, "\x1b[K", 3);
     if (y < nrows - 1) {
