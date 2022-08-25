@@ -7,18 +7,36 @@
 
 #include "aurora_types.h"
 
+/*** SECTION: Defines */
+
+#define CTRL_KEY(k) ((k) & 0x1f)
+
+/*** SECTION: Global data */
+
 static struct termios old_termios;
 
+/*** SECTION: Output handling */
+
+static void aurora_clear_screen(void) {
+  write(STDOUT_FILENO, "\x1b[2J", 4);
+  write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
+
+/*** SECTION: Terminal handling */
+
 static void aurora_die(const char *s) {
-    perror(s);
-    exit(1);
+  aurora_clear_screen();
+
+  perror(s);
+  exit(1);
 }
 
 static void aurora_restore_terminal_settings(void)
 {
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) {
-        aurora_die("restoring terminal settings");
-    }
+  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) {
+    aurora_die("restoring terminal settings");
+  }
 }
 
 static void aurora_enable_raw_mode(void) {
@@ -43,26 +61,41 @@ static void aurora_enable_raw_mode(void) {
   }
 }
 
+static u8 aurora_get_char(void) {
+  ssize_t nread;
+  u8 c;
+
+  // On Cygwin, when read() times out, it returns -1 and errno is set to EAGAIN instead of returning 0 like it is supposed to.
+  while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+    if (nread == -1 && errno != EAGAIN) {
+      aurora_die("read error");
+    }
+  }
+
+  return c;
+}
+
+/*** SECTION: Input handling */
+
+static void aurora_process_keypress(u8 c) {
+  switch (c) {
+    case CTRL_KEY('q'):
+      aurora_clear_screen();
+      exit(0);
+      break;
+  }
+}
+
+/*** SECTION: Main */
+
 int main(void) {
   aurora_enable_raw_mode();
 
   while (1) {
-    u8 ch;
+    aurora_clear_screen();
 
-    // On Cygwin, when read() times out, it returns -1 and errno is set to EAGAIN instead of returning 0 like it is supposed to.
-    if (read(STDIN_FILENO, &ch, 1) == -1 && errno != EAGAIN) {
-      aurora_die("reading from stdin");
-    }
-
-    if (iscntrl(ch)) {
-      printf("%d\r\n", ch);
-    } else {
-      printf("%d ('%c')\r\n", ch, ch);
-    }
-
-    if (ch == 'q') {
-      break;
-    }
+    u8 c = aurora_get_char();
+    aurora_process_keypress(c);
   }
   return 0;
 }
