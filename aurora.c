@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -11,9 +12,16 @@
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+/*** SECTION: Constants */
+
 /*** SECTION: Global data */
 
-static struct termios old_termios;
+struct aurora_state {
+  struct termios orig_termios;
+  v2u screen_size;
+};
+
+struct aurora_state g_state;
 
 /*** SECTION: Output handling */
 
@@ -22,6 +30,22 @@ static void aurora_clear_screen(void) {
   write(STDOUT_FILENO, "\x1b[H", 3);
 }
 
+static void aurora_editor_draw_rows(int nrows) {
+  for (int y = 0; y < nrows; y++) {
+    write(STDOUT_FILENO, "~", 1);
+
+    if (y < nrows - 1) {
+      write(STDOUT_FILENO, "\r\n", 2);
+    }
+  }
+}
+
+static void aurora_redraw_screen(void) {
+  aurora_clear_screen();
+  aurora_editor_draw_rows(g_state.screen_size.height);
+
+  write(STDOUT_FILENO, "\x1b[H", 3);
+}
 
 /*** SECTION: Terminal handling */
 
@@ -34,19 +58,19 @@ static void aurora_die(const char *s) {
 
 static void aurora_restore_terminal_settings(void)
 {
-  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) {
+  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_state.orig_termios) == -1) {
     aurora_die("restoring terminal settings");
   }
 }
 
 static void aurora_enable_raw_mode(void) {
-  if (tcgetattr(STDIN_FILENO, &old_termios) == -1) {
+  if (tcgetattr(STDIN_FILENO, &g_state.orig_termios) == -1) {
     aurora_die("getting terminal settings");
   }
 
   atexit(aurora_restore_terminal_settings);
 
-  struct termios raw = old_termios;
+  struct termios raw = g_state.orig_termios;
 
   raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
   raw.c_oflag &= ~(OPOST);
@@ -75,6 +99,52 @@ static u8 aurora_get_char(void) {
   return c;
 }
 
+static int aurora_get_cursor_position(v2u *pos) {
+  char buf[32];
+  unsigned int i = 0;
+
+  if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) {
+    return -1;
+  }
+
+  while (i < sizeof(buf) - 1) {
+    if (read(STDIN_FILENO, &buf[i], 1) != 1) {
+      break;
+    }
+    if (buf[i] == 'R') {
+      break;
+    }
+    i += 1;
+  }
+  buf[i] = '\0';
+
+  if (buf[0] != '\x1b' || buf[1] != '[') {
+    return -1;
+  }
+
+  if (sscanf(&buf[2], "%d;%d", &pos->y, &pos->x) != 2) {
+    return -1;
+  }
+
+  return 0;
+}
+
+static int aurora_get_window_size(v2u *size) {
+  struct winsize ws;
+
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) {
+      return -1;
+    }
+
+    return aurora_get_cursor_position(size);
+  }
+
+  size->width = ws.ws_col;
+  size->height = ws.ws_row;
+  return 0;
+}
+
 /*** SECTION: Input handling */
 
 static void aurora_process_keypress(u8 c) {
@@ -86,13 +156,22 @@ static void aurora_process_keypress(u8 c) {
   }
 }
 
+/*** SECTION: Initialization */
+
+static void aurora_editor_init(void) {
+  if (aurora_get_window_size(&g_state.screen_size) == -1) {
+    aurora_die("getting window size");
+  }
+}
+
 /*** SECTION: Main */
 
 int main(void) {
   aurora_enable_raw_mode();
+  aurora_editor_init();
 
   while (1) {
-    aurora_clear_screen();
+    aurora_redraw_screen();
 
     u8 c = aurora_get_char();
     aurora_process_keypress(c);

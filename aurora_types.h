@@ -18,4 +18,14 @@ typedef uint64_t u64;
 typedef float f32;
 typedef double f64;
 
+typedef union {
+  struct {
+    u32 x, y;
+  };
+  struct {
+    u32 width, height;
+  };
+  u32 v[2];
+} v2u;
+
 #endif // AURORA_TYPES_H
