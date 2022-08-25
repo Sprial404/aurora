@@ -56,6 +56,7 @@ static void aurora_editor_draw_rows(struct aurora_buffer *buf) {
   for (int y = 0; y < nrows; y++) {
     aurora_bappend(buf, "~", 1);
 
+    aurora_bappend(buf, "\x1b[K", 3);
     if (y < nrows - 1) {
       aurora_bappend(buf, "\r\n", 2);
     }
@@ -66,7 +67,6 @@ static void aurora_redraw_screen(void) {
   struct aurora_buffer buf = AURORA_BUFFER_INIT;
 
   aurora_bappend(&buf, "\x1b[?25l", 6);
-  aurora_bappend(&buf, "\x1b[2J", 4);
   aurora_bappend(&buf, "\x1b[H", 3);
 
   aurora_editor_draw_rows(&buf);
